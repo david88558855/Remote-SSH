@@ -145,6 +145,10 @@ node "{{INSTALL_DIR}}/remote.mjs" exec <HOST> "grep -rn 'pattern' /path"
 node "{{INSTALL_DIR}}/remote.mjs" exec <HOST> "ls -la /path/to/dir"
 ```
 
+## 登录 shell 执行
+
+默认所有远程命令以登录 shell（`bash -lc`）执行，profile 环境（nvm/conda/自定义 PATH）可用。profile/motd 的输出可能混入 stdout——若输出解析受干扰，可设环境变量 `SSH_REMOTE_LOGIN_SHELL=false` 关闭（合法值 `true/false/1/0/yes/no/on/off`，非法值启动即报错）。
+
 ## 规则
 
 1. **每轮都检查状态** — 不要凭记忆假设；每次都确认当前处于本地还是远程模式。

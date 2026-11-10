@@ -9,6 +9,10 @@
  *   - none     → 无 IdentityFile，password.xlsx 中也无密码记录 → 走 ssh2 库，
  *                仅凭用户名发起 "none" 认证（适用于免密/白名单认证的服务器）
  *
+ * 登录 shell：默认所有远程命令以 bash -lc 执行（加载 /etc/profile、~/.profile 等，
+ *   nvm/conda/自定义 PATH 可用）。设 SSH_REMOTE_LOGIN_SHELL=false 关闭；
+ *   合法值 true/false/1/0/yes/no/on/off，非法值启动即报错。
+ *
  * 用法：
  *   node remote.mjs list                                  列出所有主机
  *   node remote.mjs state [<host>]                        读取/设置当前活动主机
@@ -33,6 +37,30 @@ const STATE_FILE = join(__dirname, "..", ".remote-state.json");
 // ─── Helpers ────────────────────────────────────────────────────────
 function die(msg) { process.stderr.write(`[remote] ERROR: ${msg}\n`); process.exit(1); }
 function log(msg) { process.stderr.write(`[remote] ${msg}\n`); }
+
+// ─── 登录 shell 开关（默认开启）─────────────────────────────────────
+// SSH_REMOTE_LOGIN_SHELL=true/false/1/0/yes/no/on/off，非法值启动即报错。
+// 开启时所有远程命令包一层 bash -lc（加载 /etc/profile、~/.profile 等），
+// 使 nvm/conda/自定义 PATH 等登录环境可用；代价是 profile 的输出会混入 stdout。
+const LOGIN_SHELL = (() => {
+  const v = process.env.SSH_REMOTE_LOGIN_SHELL;
+  if (v === undefined || v === "") return true;
+  const t = v.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(t)) return true;
+  if (["false", "0", "no", "off"].includes(t)) return false;
+  die(`环境变量 SSH_REMOTE_LOGIN_SHELL 取值非法：${v}（合法值：true/false/1/0/yes/no/on/off）`);
+})();
+
+// 单引号安全包裹：' → '\'' （关闭引号 + 转义引号 + 重开引号）
+function shellQuote(s) {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+// 按开关包装为登录 shell 执行：bash -lc '<command>'
+function wrapLogin(command) {
+  if (!LOGIN_SHELL) return command;
+  return `bash -lc ${shellQuote(command)}`;
+}
 
 // ─── Parse SSH config ───────────────────────────────────────────────
 // 支持 Host 多别名；`Host *` 段作为默认值合并进每个主机（主机自身配置优先）
@@ -190,11 +218,11 @@ async function execRemote(hostAlias, command) {
   const entry = resolveHost(hosts, hostAlias);
 
   if (hasIdentityFile(entry)) {
-    return sshExecKey(entry, command);
+    return sshExecKey(entry, wrapLogin(command));
   }
 
   const pw = passwords[hostAlias];
-  const result = await sshExecSSH2(entry, pw || undefined, command).catch(e => {
+  const result = await sshExecSSH2(entry, pw || undefined, wrapLogin(command)).catch(e => {
     const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
     die(`${hint}连接失败：${e.message || e}`);
   });
@@ -284,12 +312,12 @@ async function main() {
         if (hasIdentityFile(entry)) {
           // Use base64 to safely pipe arbitrary content through SSH
           const b64 = Buffer.from(stdinContent, "utf-8").toString("base64");
-          const fullCmd = `echo "${b64}" | base64 -d | ${command}`;
+          const fullCmd = wrapLogin(`echo "${b64}" | base64 -d | ${command}`);
           const out = sshExecKey(entry, fullCmd);
           if (out) process.stdout.write(out);
         } else {
           const pw = passwords[hostAlias];
-          const result = await sshExecSSH2(entry, pw || undefined, command, stdinContent).catch(e => {
+          const result = await sshExecSSH2(entry, pw || undefined, wrapLogin(command), stdinContent).catch(e => {
             const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
             die(`${hint}连接失败：${e.message || e}`);
           });
@@ -314,10 +342,10 @@ async function main() {
 
       try {
         if (hasIdentityFile(entry)) {
-          process.stdout.write(sshExecKey(entry, "echo OK && uname -a && pwd"));
+          process.stdout.write(sshExecKey(entry, wrapLogin("echo OK && uname -a && pwd")));
         } else {
           const pw = passwords[hostAlias];
-          const r = await sshExecSSH2(entry, pw || undefined, "echo OK && uname -a && pwd").catch(e => {
+          const r = await sshExecSSH2(entry, pw || undefined, wrapLogin("echo OK && uname -a && pwd")).catch(e => {
             const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
             die(`${hint}连接失败：${e.message || e}`);
           });

@@ -111,6 +111,18 @@ sed -i 's|{{INSTALL_DIR}}|/opt/Remote-SSH|g' skills/remote-server/SKILL.md ssh.m
 > nvidia-smi               # 在远程执行
 ```
 
+## 登录 shell 执行
+
+默认所有远程命令以**登录 shell** 方式执行（`bash -lc` 包装），会加载 `/etc/profile`、`~/.profile` 等——服务器上装在 profile 里的环境（nvm 的 node、conda 的 python、自定义 PATH）可直接使用。
+
+**代价**：profile / motd 脚本的输出会混入命令 stdout。
+
+**关闭开关**：设环境变量 `SSH_REMOTE_LOGIN_SHELL=false`（合法值 `true/false/1/0/yes/no/on/off`，非法值启动即报错）：
+
+```bash
+SSH_REMOTE_LOGIN_SHELL=false node remote.mjs exec myserver "nvidia-smi"
+```
+
 ## 环境要求
 
 - Node.js（运行 `remote.mjs`）
