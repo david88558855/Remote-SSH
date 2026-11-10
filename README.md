@@ -81,7 +81,7 @@ cp SSH_CONFIG.example ~/.ssh/config
 - 若走密码认证 → 在 `password.xlsx` 中添加该主机的密码
 - 若服务器免密（如白名单认证）→ 什么都不用填，自动走 `none` 认证
 
-复制示例文件后编辑：A 列 = 主机别名，B 列 = 密码。
+> **💡 密码认证主机（无 IdentityFile）填写方法：** 复制 `PASSWORD_FILE.example.xlsx` → 改名为同目录下的 `password.xlsx`，打开后填好两列内容：A 列填「主机别名」（即 `~/.ssh/config` 里的 Host 名称），B 列填「密码」。以后新增密码主机，也照这个格式往里加行即可。
 
 ```bash
 cp PASSWORD_FILE.example.xlsx password.xlsx

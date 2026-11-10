@@ -102,7 +102,9 @@ if [ ! -f "$HOME/.ssh/config" ]; then
   echo " ⚠️  下一步：创建 ~/.ssh/config，填入你的服务器定义"
 fi
 if [ ! -f "$INSTALL_DIR/password.xlsx" ]; then
-  echo " ⚠️  下一步：密码认证主机需要创建 $INSTALL_DIR/password.xlsx"
+  echo " ⚠️  下一步：密码认证主机（无 IdentityFile）需要密码文件——"
+  echo "     复制 PASSWORD_FILE.example.xlsx → 改名为同目录 password.xlsx，"
+  echo "     A 列填主机别名（~/.ssh/config 里的 Host 名称），B 列填密码"
 fi
 
 echo ""

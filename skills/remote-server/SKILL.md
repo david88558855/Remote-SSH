@@ -33,6 +33,8 @@ description: SSH 远程服务器执行技能 — 将所有文件操作和命令�
 
 如果 `none` 认证被服务器拒绝，脚本会明确报错并提示补充 `IdentityFile` 或密码，不会做任何静默回退。
 
+**password.xlsx 填写方法（密码认证主机）：** 复制 `PASSWORD_FILE.example.xlsx` → 改名为同目录下的 `password.xlsx`，A 列填「主机别名」（即 `~/.ssh/config` 里的 Host 名称），B 列填「密码」，新增密码主机时照此格式加行即可。
+
 ## 可用子命令
 
 | 命令 | 用途 |
