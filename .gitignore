@@ -1,0 +1,15 @@
+# Sensitive — never commit
+password.xlsx
+*.pem
+id_rsa*
+*.key
+
+# Dependencies
+node_modules/
+
+# State files (local per-user)
+.remote-state.json
+
+# OS files
+.DS_Store
+Thumbs.db

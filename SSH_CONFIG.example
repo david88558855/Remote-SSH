@@ -1,0 +1,41 @@
+# ========================================
+# Example SSH Config — copy/edit for your own servers
+# ========================================
+# Copy this file to ~/.ssh/config and fill in your own host details.
+# This file is for reference only — never commit your real config.
+
+# ─── Direct connection with key ───────────────────────────────────
+Host my-server
+    HostName 192.168.1.100
+    User root
+    Port 22
+    IdentityFile ~/.ssh/id_rsa
+
+# ─── Jump host (bastion) ──────────────────────────────────────────
+Host behind-jump
+    HostName 10.0.1.50
+    User ubuntu
+    IdentityFile ~/.ssh/id_rsa
+    ProxyJump jump-server
+
+Host jump-server
+    HostName jump.example.com
+    User admin
+    Port 2222
+    IdentityFile ~/.ssh/id_rsa
+
+# ─── Port forwarding / non-standard port ──────────────────────────
+Host dev-cluster
+    HostName dev.example.com
+    User ma-user
+    Port 32209
+    IdentityFile ~/.ssh/cluster.pem
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+
+# ─── Password-based (no IdentityFile → uses password.xlsx) ────────
+Host password-server
+    HostName 146.56.198.165
+    User root
+    Port 22
+    # No IdentityFile = will look up password from password.xlsx

@@ -1,0 +1,10 @@
+{
+  "name": "tclaude-ssh-remote",
+  "version": "2.0.0",
+  "description": "Remote SSH execution engine for tclaude",
+  "type": "module",
+  "dependencies": {
+    "ssh2": "^1.16.0",
+    "xlsx": "^0.18.5"
+  }
+}
