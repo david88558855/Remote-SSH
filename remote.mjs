@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
- * tclaude-ssh-remote — Remote SSH execution engine (v2)
+ * remote-ssh — SSH 远程执行引擎
  *
- * Strategy:
- *   - Key-based hosts → native `ssh` command (auto-reads ~/.ssh/config,
- *     handles ProxyJump/ProxyCommand/IdentityFile etc. natively)
- *   - Password-based hosts → ssh2 library (reads password from password.xlsx)
+ * 认证方式（按 ~/.ssh/config 与 password.xlsx 确定性判定，不做自动探测）：
+ *   - key      → Host 配置了 IdentityFile → 走原生 ssh 命令
+ *                （自动处理 ProxyJump/ProxyCommand/IdentityFile 等）
+ *   - password → 无 IdentityFile，password.xlsx 中有该 Host 的密码 → 走 ssh2 库
+ *   - none     → 无 IdentityFile，password.xlsx 中也无密码记录 → 走 ssh2 库，
+ *                仅凭用户名发起 "none" 认证（适用于免密/白名单认证的服务器）
  *
- * Usage:
- *   node remote.mjs list                                  List all hosts
- *   node remote.mjs state [<host>]                        Get/set active remote
- *   node remote.mjs exec <host> <command>                 Run on remote
- *   node remote.mjs pipe <host> <command> [content]       Run with stdin piped
- *   node remote.mjs test <host>                           Quick connectivity test
+ * 用法：
+ *   node remote.mjs list                                  列出所有主机
+ *   node remote.mjs state [<host>]                        读取/设置当前活动主机
+ *   node remote.mjs exec <host> <command>                 在远程执行命令
+ *   node remote.mjs pipe <host> <command> [content]       通过 stdin 管道执行
+ *   node remote.mjs test <host>                           快速连通性测试
  */
 
 import { readFileSync, existsSync, writeFileSync } from "fs";
@@ -77,7 +79,7 @@ function readPasswords(path) {
 // ─── Resolve host ───────────────────────────────────────────────────
 function resolveHost(hosts, alias) {
   const entry = hosts.find(h => h.host === alias);
-  if (!entry) die(`Host "${alias}" not found. Available: ${hosts.map(h => h.host).filter(Boolean).join(", ")}`);
+  if (!entry) die(`主机 "${alias}" 不存在。可用主机：${hosts.map(h => h.host).filter(Boolean).join(", ")}`);
   return entry;
 }
 
@@ -110,10 +112,11 @@ function sshExecKey(entry, command) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Password-based execution: use ssh2 library
-//   Reads HostName, Port, User from parsed config; password from xlsx
+// ssh2 执行：password 认证与 none 认证共用
+//   从解析后的 config 读取 HostName/Port/User；password 认证时额外传密码，
+//   none 认证时仅传用户名（ssh2 会尝试 "none" 认证方法）
 // ═══════════════════════════════════════════════════════════════════════
-function sshExecPassword(entry, password, command, stdinContent = null) {
+function sshExecSSH2(entry, password, command, stdinContent = null) {
   return new Promise((resolve, reject) => {
     const conn = new Client();
     const cfg = entry.config;
@@ -142,17 +145,26 @@ function sshExecPassword(entry, password, command, stdinContent = null) {
 
     conn.on("error", (err) => reject(err));
 
-    conn.connect({
+    const connectOpts = {
       host: hostname,
       port,
       username,
-      password,
       readyTimeout: 15000
-    });
+    };
+    if (password) connectOpts.password = password;
+
+    conn.connect(connectOpts);
   });
 }
 
-// ─── Execute (auto-choose key vs password) ──────────────────────────
+// none 认证失败的提示信息
+function noneAuthHint(alias) {
+  return `主机 "${alias}" 无 IdentityFile 且 password.xlsx 中无密码记录，` +
+    `已按 none 方式（仅用户名）认证。若服务器要求密码或密钥，` +
+    `请补充 IdentityFile 或在 password.xlsx 中添加该主机的密码。`;
+}
+
+// ─── 执行（按规则选择 key / password / none） ────────────────────────
 async function execRemote(hostAlias, command) {
   const entry = resolveHost(hosts, hostAlias);
 
@@ -161,8 +173,10 @@ async function execRemote(hostAlias, command) {
   }
 
   const pw = passwords[hostAlias];
-  if (!pw) die(`No password for "${hostAlias}". Add it to password.xlsx.`);
-  const result = await sshExecPassword(entry, pw, command);
+  const result = await sshExecSSH2(entry, pw || undefined, command).catch(e => {
+    const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
+    die(`${hint}连接失败：${e.message || e}`);
+  });
   process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.code !== 0) process.exitCode = result.code;
@@ -177,11 +191,11 @@ const passwords = readPasswords(PASSWORD_FILE);
 async function main() {
   switch (cmd) {
     case "list": {
-      console.log("Available SSH hosts:\n");
+      console.log("可用 SSH 主机：\n");
       for (const h of hosts) {
         const hasKey = hasIdentityFile(h);
         const hasPw = !!passwords[h.host];
-        const auth = hasKey ? "key" : hasPw ? "password" : "NO_AUTH";
+        const auth = hasKey ? "key" : hasPw ? "password" : "none";
         const u = h.config.user || "?";
         const h2 = h.config.hostname || "?";
         const p = h.config.port || "22";
@@ -199,14 +213,14 @@ async function main() {
         } else {
           console.log(JSON.stringify({ host: "local", since: null }));
         }
-      } else if (target === "local" || target === "none") {
+      } else if (target === "local") {
         writeFileSync(STATE_FILE, JSON.stringify({ host: "local", since: new Date().toISOString() }, null, 2));
-        log("Switched to LOCAL mode");
+        log("已切换到本地模式");
         console.log(JSON.stringify(JSON.parse(readFileSync(STATE_FILE, "utf-8"))));
       } else {
         resolveHost(hosts, target);
         writeFileSync(STATE_FILE, JSON.stringify({ host: target, since: new Date().toISOString() }, null, 2));
-        log(`Switched to: ${target}`);
+        log(`已切换到：${target}`);
         console.log(JSON.stringify(JSON.parse(readFileSync(STATE_FILE, "utf-8"))));
       }
       break;
@@ -215,7 +229,7 @@ async function main() {
     case "exec": {
       const hostAlias = process.argv[3];
       const command = process.argv.slice(4).join(" ");
-      if (!hostAlias || !command) die("Usage: remote.mjs exec <host> <command>");
+      if (!hostAlias || !command) die("用法：remote.mjs exec <host> <command>");
 
       try {
         const out = await execRemote(hostAlias, command);
@@ -229,11 +243,11 @@ async function main() {
     }
 
     // ── pipe: pipe stdin content to remote command ─────────────
-    // Usage: echo "content" | node remote.mjs pipe <host> "cat > /path/file"
+    // 用法：echo "内容" | node remote.mjs pipe <host> "cat > /path/file"
     case "pipe": {
       const hostAlias = process.argv[3];
       const command = process.argv.slice(4).join(" ");
-      if (!hostAlias || !command) die("Usage: remote.mjs pipe <host> <command>");
+      if (!hostAlias || !command) die("用法：remote.mjs pipe <host> <command>");
 
       // Read all stdin first
       const chunks = [];
@@ -254,8 +268,10 @@ async function main() {
           if (out) process.stdout.write(out);
         } else {
           const pw = passwords[hostAlias];
-          if (!pw) die(`No password for "${hostAlias}". Add it to password.xlsx.`);
-          const result = await sshExecPassword(entry, pw, command, stdinContent);
+          const result = await sshExecSSH2(entry, pw || undefined, command, stdinContent).catch(e => {
+            const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
+            die(`${hint}连接失败：${e.message || e}`);
+          });
           if (result.stdout) process.stdout.write(result.stdout);
           if (result.stderr) process.stderr.write(result.stderr);
           if (result.code !== 0) process.exitCode = result.code;
@@ -270,33 +286,35 @@ async function main() {
 
     case "test": {
       const hostAlias = process.argv[3];
-      if (!hostAlias) die("Usage: remote.mjs test <host>");
+      if (!hostAlias) die("用法：remote.mjs test <host>");
 
       const entry = resolveHost(hosts, hostAlias);
-      log(`Testing ${hostAlias}...`);
+      log(`正在测试 ${hostAlias}...`);
 
       try {
         if (hasIdentityFile(entry)) {
           process.stdout.write(sshExecKey(entry, "echo OK && uname -a && pwd"));
         } else {
           const pw = passwords[hostAlias];
-          if (!pw) die(`No password for "${hostAlias}".`);
-          const r = await sshExecPassword(entry, pw, "echo OK && uname -a && pwd");
+          const r = await sshExecSSH2(entry, pw || undefined, "echo OK && uname -a && pwd").catch(e => {
+            const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
+            die(`${hint}连接失败：${e.message || e}`);
+          });
           process.stdout.write(r.stdout);
           if (r.stderr) process.stderr.write(r.stderr);
         }
-        log("Connection successful!");
+        log("连接成功！");
       } catch (e) {
         if (e.stdout) process.stdout.write(e.stdout);
         if (e.stderr) process.stderr.write(e.stderr);
-        log(`Connection FAILED: ${e.message || e}`);
+        log(`连接失败：${e.message || e}`);
         process.exit(1);
       }
       break;
     }
 
     default:
-      die(`Unknown command: ${cmd}\nUsage: remote.mjs <list|state|exec|pipe|test>`);
+      die(`未知命令：${cmd}\n用法：remote.mjs <list|state|exec|pipe|test>`);
   }
 }
 

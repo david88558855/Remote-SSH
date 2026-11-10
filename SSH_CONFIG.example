@@ -1,17 +1,17 @@
 # ========================================
-# Example SSH Config — copy/edit for your own servers
+# SSH Config 示例 — 复制后填入你自己的服务器信息
 # ========================================
-# Copy this file to ~/.ssh/config and fill in your own host details.
-# This file is for reference only — never commit your real config.
+# 复制本文件到 ~/.ssh/config 后编辑。
+# 本文件仅供参考 — 不要提交真实的配置文件。
 
-# ─── Direct connection with key ───────────────────────────────────
+# ─── 密钥认证直连（方式：key）──────────────────────────────────────
 Host my-server
     HostName 192.168.1.100
     User root
     Port 22
     IdentityFile ~/.ssh/id_rsa
 
-# ─── Jump host (bastion) ──────────────────────────────────────────
+# ─── 跳板机（堡垒机）───────────────────────────────────────────────
 Host behind-jump
     HostName 10.0.1.50
     User ubuntu
@@ -24,7 +24,7 @@ Host jump-server
     Port 2222
     IdentityFile ~/.ssh/id_rsa
 
-# ─── Port forwarding / non-standard port ──────────────────────────
+# ─── 端口转发 / 非标准端口 ──────────────────────────────────────────
 Host dev-cluster
     HostName dev.example.com
     User ma-user
@@ -33,9 +33,18 @@ Host dev-cluster
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 
-# ─── Password-based (no IdentityFile → uses password.xlsx) ────────
+# ─── 密码认证（无 IdentityFile → 从 password.xlsx 查密码）─────────
 Host password-server
     HostName 146.56.198.165
     User root
     Port 22
-    # No IdentityFile = will look up password from password.xlsx
+    # 无 IdentityFile，且 password.xlsx 中有该主机记录 → 密码认证
+
+# ─── 免密认证（无 IdentityFile，password.xlsx 中也无记录 → none）──
+Host noauth-server
+    HostName 10.0.2.10
+    User deploy
+    Port 22
+    # 无 IdentityFile 且 password.xlsx 中无记录 → 自动走 none 认证
+    # （仅凭用户名发起 SSH "none" 认证，适用于免密/白名单认证的服务器；
+    #   若服务器要求凭据，会明确报错并提示补充配置）

@@ -1,7 +1,7 @@
 {
-  "name": "tclaude-ssh-remote",
-  "version": "2.0.0",
-  "description": "Remote SSH execution engine for tclaude",
+  "name": "remote-ssh",
+  "version": "2.1.0",
+  "description": "SSH 远程执行引擎 — 将 AI 助手的操作路由到远程 Linux 服务器（支持 key / password / none 三种认证）",
   "type": "module",
   "dependencies": {
     "ssh2": "^1.16.0",

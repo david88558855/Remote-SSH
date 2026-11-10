@@ -1,74 +1,71 @@
 #!/usr/bin/env bash
 # ============================================
-# Claude Remote SSH — Installer
+# Remote-SSH — 通用安装脚本
 # ============================================
-# Run this script from the repo root.
-#   bash install.sh                  → install to ~/.tclaude
-#   bash install.sh --claude         → install to ~/.claude (vanilla Claude Code)
+# 在仓库根目录运行：
+#   bash install.sh <目标目录>    → 安装到指定 AI 技能目录
+#   bash install.sh               → 默认安装到 ~/.ai-skills
+#
+# 安装产物：
+#   <目标目录>/commands/ssh.md              ← /ssh 触发指令定义
+#   <目标目录>/skills/remote-server/SKILL.md ← 技能文档
 # ============================================
 set -e
 
-# Detect config dir
-if [ "$1" = "--claude" ]; then
-  CONFIG_DIR="$HOME/.claude"
-  BRAND="Claude Code"
-else
-  CONFIG_DIR="$HOME/.tclaude"
-  BRAND="tclaude"
-fi
+CONFIG_DIR="${1:-$HOME/.ai-skills}"
 
 INSTALL_DIR="$( cd "$( dirname "$0" )" && pwd )"
 
 echo "============================================"
-echo " Claude Remote SSH — Installer"
+echo " Remote-SSH — 安装程序"
 echo "============================================"
 echo ""
-echo " Install target: $BRAND ($CONFIG_DIR)"
-echo " Script dir:    $INSTALL_DIR"
+echo " 安装目标：$CONFIG_DIR"
+echo " 脚本目录：$INSTALL_DIR"
 echo ""
 
-# ─── Check prerequisites ───────────────────────────────────────
-command -v node >/dev/null 2>&1 || { echo "❌ Node.js is required but not found. Install it first."; exit 1; }
-command -v ssh >/dev/null 2>&1 || { echo "❌ OpenSSH client is required but not found."; exit 1; }
+# ─── 检查前置依赖 ───────────────────────────────────────────────
+command -v node >/dev/null 2>&1 || { echo "❌ 未找到 Node.js，请先安装。"; exit 1; }
+command -v ssh >/dev/null 2>&1 || { echo "❌ 未找到 OpenSSH 客户端，请先安装。"; exit 1; }
 
-# ─── Check SSH config ──────────────────────────────────────────
+# ─── 检查 SSH 配置 ──────────────────────────────────────────────
 if [ ! -f "$HOME/.ssh/config" ]; then
-  echo "⚠️  WARNING: ~/.ssh/config not found!"
-  echo "   This skill requires an SSH config file to work."
-  echo "   Copy the example: cp SSH_CONFIG.example ~/.ssh/config"
-  echo "   Then edit it with your real server details."
+  echo "⚠️  警告：未找到 ~/.ssh/config！"
+  echo "   本技能需要 SSH 配置文件才能工作。"
+  echo "   可先复制示例：cp SSH_CONFIG.example ~/.ssh/config"
+  echo "   然后填入你真实的服务器信息。"
   echo ""
 fi
 
-# ─── Check password file ───────────────────────────────────────
+# ─── 检查密码文件 ───────────────────────────────────────────────
 if [ ! -f "$INSTALL_DIR/password.xlsx" ]; then
-  echo "⚠️  WARNING: password.xlsx not found in $INSTALL_DIR"
-  echo "   If you have password-based hosts (no IdentityFile),"
-  echo "   create this file with columns: host_alias | password"
+  echo "⚠️  提示：$INSTALL_DIR 下未找到 password.xlsx"
+  echo "   若有密码认证的主机（无 IdentityFile），"
+  echo "   请创建该文件，两列分别为：主机别名 | 密码"
+  echo "   （免密主机无需配置，自动走 none 认证）"
   echo ""
 fi
 
-# ─── Install npm deps ──────────────────────────────────────────
-echo "📦 Installing npm dependencies..."
+# ─── 安装 npm 依赖 ──────────────────────────────────────────────
+echo "📦 正在安装 npm 依赖..."
 cd "$INSTALL_DIR"
-npm install --silent 2>&1 || { echo "❌ npm install failed."; exit 1; }
-echo "   Done."
+npm install --silent 2>&1 || { echo "❌ npm install 失败。"; exit 1; }
+echo "   完成。"
 echo ""
 
-# ─── Create directories ────────────────────────────────────────
+# ─── 创建目录 ────────────────────────────────────────────────────
 mkdir -p "$CONFIG_DIR/commands"
-mkdir -p "$CONFIG_DIR/skills"
+mkdir -p "$CONFIG_DIR/skills/remote-server"
 
-# ─── Replace {{INSTALL_DIR}} placeholder ───────────────────────
-# Convert Windows backslashes to forward slashes for sed compatibility
+# ─── 替换 {{INSTALL_DIR}} 占位符 ────────────────────────────────
+# 反斜杠转正斜杠，保证 sed 兼容
 INSTALL_DIR_FIXED=$(echo "$INSTALL_DIR" | sed 's/\\/\//g')
 
-echo "🔧 Patching files with install path: $INSTALL_DIR_FIXED"
+echo "🔧 正在写入安装路径：$INSTALL_DIR_FIXED"
 
-# Create temp copies with replaced paths
 sed "s|{{INSTALL_DIR}}|$INSTALL_DIR_FIXED|g" "$INSTALL_DIR/skills/remote-server/SKILL.md" \
   > "$CONFIG_DIR/skills/remote-server/SKILL.md.tmp" 2>/dev/null || {
-    # sed -i might behave differently; fallback to perl or node
+    # sed 行为不一致时回退到 node
     node -e "
       const fs=require('fs');
       let s=fs.readFileSync('$INSTALL_DIR_FIXED/skills/remote-server/SKILL.md','utf8');
@@ -76,8 +73,6 @@ sed "s|{{INSTALL_DIR}}|$INSTALL_DIR_FIXED|g" "$INSTALL_DIR/skills/remote-server/
       fs.writeFileSync('$CONFIG_DIR/skills/remote-server/SKILL.md.tmp',s);
     "
   }
-
-mkdir -p "$CONFIG_DIR/skills/remote-server"
 mv "$CONFIG_DIR/skills/remote-server/SKILL.md.tmp" "$CONFIG_DIR/skills/remote-server/SKILL.md"
 
 node -e "
@@ -87,29 +82,29 @@ node -e "
   fs.writeFileSync('$CONFIG_DIR/commands/ssh.md',s);
 "
 
-echo "   Done."
+echo "   完成。"
 echo ""
 
-# ─── Done ──────────────────────────────────────────────────────
+# ─── 完成 ────────────────────────────────────────────────────────
 echo "============================================"
-echo " ✅ Installation complete!"
+echo " ✅ 安装完成！"
 echo "============================================"
 echo ""
-echo " Files installed:"
+echo " 已安装文件："
 echo "   $CONFIG_DIR/commands/ssh.md"
 echo "   $CONFIG_DIR/skills/remote-server/SKILL.md"
 echo ""
-echo " Script location:"
+echo " 脚本位置："
 echo "   $INSTALL_DIR/remote.mjs"
 echo ""
 
 if [ ! -f "$HOME/.ssh/config" ]; then
-  echo " ⚠️  Next: create ~/.ssh/config with your server definitions"
+  echo " ⚠️  下一步：创建 ~/.ssh/config，填入你的服务器定义"
 fi
 if [ ! -f "$INSTALL_DIR/password.xlsx" ]; then
-  echo " ⚠️  Next: create $INSTALL_DIR/password.xlsx for password-based hosts"
+  echo " ⚠️  下一步：密码认证主机需要创建 $INSTALL_DIR/password.xlsx"
 fi
 
 echo ""
-echo " Restart $BRAND, then try: /ssh <your-host>"
+echo " 重启你的 AI 助手，然后试试：/ssh <主机名>"
 echo ""

@@ -1,26 +1,39 @@
 ---
-description: Connect to a remote SSH server. Usage: /ssh <hostname> or /ssh local to return.
-allowed-tools: Bash(node "{{INSTALL_DIR}}/remote.mjs":*)
+description: 连接远程 SSH 服务器。用法：/ssh <主机名> 连接指定主机，/ssh local 切回本地模式，/ssh 不带参数列出所有可用主机。
 ---
 
-## Your task
+# `/ssh` 命令说明
 
-The user typed `/ssh <hostname>`. Their exact message is: $ARGUMENTS
+这是一个通用触发指令：任何 AI 助手识别到用户输入 `/ssh <参数>` 时，按下述流程处理。用户输入的完整内容为：`/ssh` 之后的所有参数。
 
-Extract the hostname from the arguments. Then:
+## 处理流程
 
-1. If no hostname is given, list available hosts:
-   ```
+1. **未指定主机名**（用户只输入了 `/ssh`）— 列出所有可用主机：
+
+   ```bash
    node "{{INSTALL_DIR}}/remote.mjs" list
    ```
 
-2. If a hostname is given, set it as the active remote:
-   ```
-   node "{{INSTALL_DIR}}/remote.mjs" state <hostname>
+   把主机列表展示给用户，请其选择要连接的主机。
+
+2. **指定了主机名** — 将其设为当前活动远程主机：
+
+   ```bash
+   node "{{INSTALL_DIR}}/remote.mjs" state <主机名>
    ```
 
-3. After setting the host, tell the user what happened:
-   - If hostname is "local": "✅ Switched to local mode."
-   - Otherwise: "✅ Now connected to **<hostname>**. All subsequent commands in this session will run on this server."
+3. **执行后向用户反馈结果：**
+   - 主机名为 `local`：「✅ 已切换到本地模式。」
+   - 其他主机名：「✅ 已连接到 **<主机名>**，本会话后续所有命令都将在该服务器上执行。」
 
-The `remote.mjs` script will save the state to `.remote-state.json` in the install directory. The skill `remote-server` will handle routing further operations to this host.
+## 状态存储
+
+`remote.mjs` 会把当前活动主机写入安装目录上级的 `.remote-state.json` 文件。技能 `remote-server` 负责在后续操作中读取该状态，并把文件读写、命令执行等操作路由到对应主机。
+
+## 认证方式
+
+主机按以下规则确定性认证（详见 SKILL.md）：
+
+- 配置了 `IdentityFile` → 密钥认证（走原生 ssh）
+- `password.xlsx` 中有密码记录 → 密码认证
+- 两者皆无 → `none` 免凭据认证（仅用户名）
