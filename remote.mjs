@@ -35,28 +35,48 @@ function die(msg) { process.stderr.write(`[remote] ERROR: ${msg}\n`); process.ex
 function log(msg) { process.stderr.write(`[remote] ${msg}\n`); }
 
 // ─── Parse SSH config ───────────────────────────────────────────────
+// 支持 Host 多别名；`Host *` 段作为默认值合并进每个主机（主机自身配置优先）
 function parseSSHConfig(path) {
   if (!existsSync(path)) die(`SSH config not found: ${path}`);
   const text = readFileSync(path, "utf-8");
   const hosts = [], lines = text.split("\n");
-  let current = null;
+  const defaults = {};
+  let current = null;   // { aliases: [], config: {} }
+  let inWildcard = false;
+
+  const flush = () => {
+    if (!current) return;
+    for (const alias of current.aliases) {
+      hosts.push({ host: alias, config: { ...defaults, ...current.config } });
+    }
+    current = null;
+  };
 
   for (const raw of lines) {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) continue;
     if (/^Host\s+/i.test(line)) {
-      if (current && current.host) hosts.push(current);
-      const alias = line.replace(/^Host\s+/i, "").trim().split(/\s+/)[0];
-      current = (alias === "*") ? null : { host: alias, config: {} };
-      current && (current.config._rawHost = alias);
+      flush();
+      inWildcard = false;
+      const aliases = line.replace(/^Host\s+/i, "").trim().split(/\s+/).filter(Boolean);
+      if (aliases.length === 1 && aliases[0] === "*") {
+        inWildcard = true;   // 后续行进 defaults
+        continue;
+      }
+      const real = aliases.filter(a => a !== "*");
+      if (real.length) current = { aliases: real, config: {} };
+      continue;
+    }
+    const m = line.match(/^\s*(\S+)\s+(.+)/);
+    if (!m) continue;
+    if (inWildcard) {
+      defaults[m[1].toLowerCase()] = m[2].trim();
       continue;
     }
     if (!current) continue;
-    const m = line.match(/^\s*(\S+)\s+(.+)/);
-    if (!m) continue;
     current.config[m[1].toLowerCase()] = m[2].trim();
   }
-  if (current && current.host) hosts.push(current);
+  flush();
   return hosts;
 }
 
@@ -69,7 +89,8 @@ function readPasswords(path) {
     for (const row of rows) {
       if (row && row.length >= 2) {
         const h = String(row[0]).trim(), p = String(row[1]).trim();
-        if (h && p) pwMap[h] = p;
+        // 跳过表头行（host | password），避免主机别名恰为 "host" 时误匹配
+        if (h && p && h.toLowerCase() !== "host") pwMap[h] = p;
       }
     }
   }

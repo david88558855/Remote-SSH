@@ -18,11 +18,10 @@ const server = new Server({ hostKeys: [hostKey] }, (conn) => {
       const session = accept();
       session.on("exec", (a, r, info) => {
         const stream = a();
-        stream.write(`MOCK_OK ${ctx_user}:${info.command}\n`);
+        stream.write(`MOCK_OK ${info.command}\n`);
         stream.exit(0); stream.end();
       });
     });
   });
 });
-let ctx_user = "";
 server.listen(59998, "127.0.0.1", () => console.log("mock2 sshd 就绪 :59998"));
