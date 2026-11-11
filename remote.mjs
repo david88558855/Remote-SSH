@@ -9,9 +9,9 @@
  *   - none     → 无 IdentityFile，password.xlsx 中也无密码记录 → 走 ssh2 库，
  *                仅凭用户名发起 "none" 认证（适用于免密/白名单认证的服务器）
  *
- * 登录 shell：默认所有远程命令以 bash -lc 执行（加载 /etc/profile、~/.profile 等，
- *   nvm/conda/自定义 PATH 可用）。设 SSH_REMOTE_LOGIN_SHELL=false 关闭；
- *   合法值 true/false/1/0/yes/no/on/off，非法值启动即报错。
+ * PATH：无默认值。Host 的 RemotePath > SSH_REMOTE_PATH 环境变量 > 不加前缀
+ *   （用 sshd 默认 PATH）。配置后命令前注入 export PATH=...，不加载 profile。
+ *   值含 $PATH 时双引号注入由远端展开（追加模式）。
  *
  * 用法：
  *   node remote.mjs list                                  列出所有主机
@@ -38,29 +38,20 @@ const STATE_FILE = join(__dirname, "..", ".remote-state.json");
 function die(msg) { process.stderr.write(`[remote] ERROR: ${msg}\n`); process.exit(1); }
 function log(msg) { process.stderr.write(`[remote] ${msg}\n`); }
 
-// ─── 登录 shell 开关（默认开启）─────────────────────────────────────
-// SSH_REMOTE_LOGIN_SHELL=true/false/1/0/yes/no/on/off，非法值启动即报错。
-// 开启时所有远程命令包一层 bash -lc（加载 /etc/profile、~/.profile 等），
-// 使 nvm/conda/自定义 PATH 等登录环境可用；代价是 profile 的输出会混入 stdout。
-const LOGIN_SHELL = (() => {
-  const v = process.env.SSH_REMOTE_LOGIN_SHELL;
-  if (v === undefined || v === "") return true;
-  const t = v.toLowerCase();
-  if (["true", "1", "yes", "on"].includes(t)) return true;
-  if (["false", "0", "no", "off"].includes(t)) return false;
-  die(`环境变量 SSH_REMOTE_LOGIN_SHELL 取值非法：${v}（合法值：true/false/1/0/yes/no/on/off）`);
-})();
-
-// 单引号安全包裹：' → '\'' （关闭引号 + 转义引号 + 重开引号）
-function shellQuote(s) {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+// ─── 显式 PATH 注入（无默认值，没配就不加前缀）──────────────────────
+// 取值优先级：Host 的 RemotePath > 环境变量 SSH_REMOTE_PATH > 不加前缀
+// 值含 $PATH 时用双引号注入（远端 shell 展开，实现追加）；否则单引号安全包裹
+function pathPrefix(entry) {
+  const v = (entry.config.remotepath || process.env.SSH_REMOTE_PATH || "").trim();
+  if (!v) return "";
+  if (v.includes("$PATH")) return `export PATH="${v}" && `;
+  return `export PATH='${v.replace(/'/g, `'\\''`)}' && `;
 }
 
-// 按开关包装为登录 shell 执行：bash -lc '<command>'
-function wrapLogin(command) {
-  if (!LOGIN_SHELL) return command;
-  return `bash -lc ${shellQuote(command)}`;
-}
+// 远端 command not found（exit 127）时的报错指引
+const PATH_HINT =
+  `若该主机命令装在特殊路径，请在其 ~/.ssh/config 的 Host 段配置 ` +
+  `RemotePath /你的目录:/另一个目录，或设置环境变量 SSH_REMOTE_PATH。`;
 
 // ─── Parse SSH config ───────────────────────────────────────────────
 // 支持 Host 多别名；`Host *` 段作为默认值合并进每个主机（主机自身配置优先）
@@ -218,16 +209,17 @@ async function execRemote(hostAlias, command) {
   const entry = resolveHost(hosts, hostAlias);
 
   if (hasIdentityFile(entry)) {
-    return sshExecKey(entry, wrapLogin(command));
+    return sshExecKey(entry, pathPrefix(entry) + command);
   }
 
   const pw = passwords[hostAlias];
-  const result = await sshExecSSH2(entry, pw || undefined, wrapLogin(command)).catch(e => {
+  const result = await sshExecSSH2(entry, pw || undefined, pathPrefix(entry) + command).catch(e => {
     const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
     die(`${hint}连接失败：${e.message || e}`);
   });
   process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
+  if (result.code === 127) log(`远端提示：command not found。${PATH_HINT}`);
   if (result.code !== 0) process.exitCode = result.code;
   return "";
 }
@@ -248,7 +240,8 @@ async function main() {
         const u = h.config.user || "?";
         const h2 = h.config.hostname || "?";
         const p = h.config.port || "22";
-        console.log(`  ${h.host.padEnd(20)} → ${u}@${h2}:${p}  [${auth}]`);
+        const pathTag = h.config.remotepath ? "  [path]" : "";
+        console.log(`  ${h.host.padEnd(20)} → ${u}@${h2}:${p}  [${auth}]${pathTag}`);
       }
       break;
     }
@@ -286,6 +279,7 @@ async function main() {
       } catch (e) {
         if (e.stdout) process.stdout.write(e.stdout);
         if (e.stderr) process.stderr.write(e.stderr);
+        if (e.status === 127) log(`远端提示：command not found。${PATH_HINT}`);
         process.exit(e.status || 1);
       }
       break;
@@ -312,17 +306,18 @@ async function main() {
         if (hasIdentityFile(entry)) {
           // Use base64 to safely pipe arbitrary content through SSH
           const b64 = Buffer.from(stdinContent, "utf-8").toString("base64");
-          const fullCmd = wrapLogin(`echo "${b64}" | base64 -d | ${command}`);
+          const fullCmd = pathPrefix(entry) + `echo "${b64}" | base64 -d | ${command}`;
           const out = sshExecKey(entry, fullCmd);
           if (out) process.stdout.write(out);
         } else {
           const pw = passwords[hostAlias];
-          const result = await sshExecSSH2(entry, pw || undefined, wrapLogin(command), stdinContent).catch(e => {
+          const result = await sshExecSSH2(entry, pw || undefined, pathPrefix(entry) + command, stdinContent).catch(e => {
             const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
             die(`${hint}连接失败：${e.message || e}`);
           });
           if (result.stdout) process.stdout.write(result.stdout);
           if (result.stderr) process.stderr.write(result.stderr);
+          if (result.code === 127) log(`远端提示：command not found。${PATH_HINT}`);
           if (result.code !== 0) process.exitCode = result.code;
         }
       } catch (e) {
@@ -342,10 +337,10 @@ async function main() {
 
       try {
         if (hasIdentityFile(entry)) {
-          process.stdout.write(sshExecKey(entry, wrapLogin("echo OK && uname -a && pwd")));
+          process.stdout.write(sshExecKey(entry, pathPrefix(entry) + "echo OK && uname -a && pwd"));
         } else {
           const pw = passwords[hostAlias];
-          const r = await sshExecSSH2(entry, pw || undefined, wrapLogin("echo OK && uname -a && pwd")).catch(e => {
+          const r = await sshExecSSH2(entry, pw || undefined, pathPrefix(entry) + "echo OK && uname -a && pwd").catch(e => {
             const hint = pw ? "" : noneAuthHint(hostAlias) + "\n";
             die(`${hint}连接失败：${e.message || e}`);
           });

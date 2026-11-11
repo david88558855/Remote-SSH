@@ -111,17 +111,28 @@ sed -i 's|{{INSTALL_DIR}}|/opt/Remote-SSH|g' skills/remote-server/SKILL.md ssh.m
 > nvidia-smi               # 在远程执行
 ```
 
-## 登录 shell 执行
+## PATH 设置
 
-默认所有远程命令以**登录 shell** 方式执行（`bash -lc` 包装），会加载 `/etc/profile`、`~/.profile` 等——服务器上装在 profile 里的环境（nvm 的 node、conda 的 python、自定义 PATH）可直接使用。
+远程命令**不加载登录环境**（不用 bash -lc，profile/motd 输出不会混入 stdout）。命令装在特殊路径的主机，通过显式配置 PATH 注入解决——**无默认值，没配就不加前缀**（用 sshd 默认 PATH）：
 
-**代价**：profile / motd 脚本的输出会混入命令 stdout。
+| 优先级 | 配置方式 | 作用域 |
+|--------|----------|--------|
+| 1 | `~/.ssh/config` Host 段加 `RemotePath /你的目录:/另一个目录` | 单主机 |
+| 2 | 环境变量 `SSH_REMOTE_PATH=/你的目录:...` | 全局兜底 |
 
-**关闭开关**：设环境变量 `SSH_REMOTE_LOGIN_SHELL=false`（合法值 `true/false/1/0/yes/no/on/off`，非法值启动即报错）：
+生效后命令前注入 `export PATH='...'`，整条命令（含 `&&` 链、管道）全程有效。`list` 输出会给配了 `RemotePath` 的主机加 `[path]` 标记。
 
-```bash
-SSH_REMOTE_LOGIN_SHELL=false node remote.mjs exec myserver "nvidia-smi"
+**追加模式**：值里写 `$PATH` 表示保留 sshd 默认 PATH 再追加目录（如 `RemotePath /opt/tools/bin:$PATH`），此时用双引号注入、由远端 shell 展开。
+
+```ssh-config
+# ~/.ssh/config 示例
+Host gpu-server
+    HostName 192.168.1.10
+    User root
+    RemotePath /usr/local/cuda/bin:/opt/conda/bin:$PATH
 ```
+
+**快速失败**：远端报 command not found（exit 127）时，错误信息会提示配置 `RemotePath` 或 `SSH_REMOTE_PATH`，不做任何自动探测。
 
 ## 环境要求
 
